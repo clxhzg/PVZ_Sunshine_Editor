@@ -10,13 +10,13 @@
 
 // 函数声明
 void ClearScreen();
-DWORD GetProcessIdByName(const char* processName);
+DWORD GetProcessIdByName(const wchar_t* processName);
 DWORD GetSunValue(HANDLE handle, DWORD baseAddr);
 BOOL SetSunValue(HANDLE handle, DWORD baseAddr, DWORD newValue);
 void MonitorSunValue(HANDLE handle, DWORD baseAddr, DWORD targetValue);
 
 int main() {
-    const char* processName = "PlantsVsZombies.exe";
+    const wchar_t* processName = L"PlantsVsZombies.exe";
     DWORD processId;
     HANDLE hProcess;
     DWORD baseAddress = 0x00400000; // 游戏基地址
@@ -27,7 +27,7 @@ int main() {
     processId = GetProcessIdByName(processName);
     if (processId == 0) {
         ClearScreen();
-        printf("错误: 未找到 %s 进程。请先运行游戏。\n", processName);
+        wprintf(L"错误: 未找到 %s 进程。请先运行游戏。\n", processName);
         system("pause");
         return 1;
     }
@@ -50,69 +50,91 @@ int main() {
         printf("2. 持续锁定阳光值\n");
         printf("3. 退出\n");
         printf("请选择: ");
-        scanf("%d", &choice);
+
+        // 使用安全的scanf_s
+        if (scanf_s("%d", &choice) != 1) {
+            while (getchar() != '\n'); // 清除输入缓冲区
+            printf("\n输入无效，请重新选择!\n");
+            Sleep(1000);
+            continue;
+        }
 
         switch (choice) {
-            case 1:
-                ClearScreen();
-                printf("当前阳光值: %u\n", GetSunValue(hProcess, baseAddress));
-                printf("\n请输入新的阳光值: ");
-                scanf("%u", &newSunValue);
-                if (SetSunValue(hProcess, baseAddress, newSunValue)) {
-                    printf("\n阳光值已成功修改为 %u\n", newSunValue);
-                } else {
-                    printf("\n修改失败!\n");
-                }
+        case 1: {
+            ClearScreen();
+            DWORD currentSun = GetSunValue(hProcess, baseAddress);
+            printf("当前阳光值: %u\n", currentSun);
+            printf("\n请输入新的阳光值: ");
+
+            if (scanf_s("%u", &newSunValue) != 1) {
+                while (getchar() != '\n'); // 清除输入缓冲区
+                printf("\n输入无效!\n");
+            }
+            else if (SetSunValue(hProcess, baseAddress, newSunValue)) {
+                printf("\n阳光值已成功修改为 %u\n", newSunValue);
+            }
+            else {
+                printf("\n修改失败!\n");
+            }
+            system("pause");
+            break;
+        }
+
+        case 2: {
+            ClearScreen();
+            printf("当前阳光值: %u\n", GetSunValue(hProcess, baseAddress));
+            printf("\n请输入要锁定的阳光值: ");
+
+            if (scanf_s("%u", &newSunValue) != 1) {
+                while (getchar() != '\n'); // 清除输入缓冲区
+                printf("\n输入无效!\n");
                 system("pause");
                 break;
-            
-            case 2:
-                ClearScreen();
-                printf("当前阳光值: %u\n", GetSunValue(hProcess, baseAddress));
-                printf("\n请输入要锁定的阳光值: ");
-                scanf("%u", &newSunValue);
-                ClearScreen();
-                printf("正在持续锁定阳光值为 %u (按任意键停止)...\n", newSunValue);
-                MonitorSunValue(hProcess, baseAddress, newSunValue);
-                printf("\n已停止锁定阳光值\n");
-                system("pause");
-                break;
-            
-            case 3:
-                CloseHandle(hProcess);
-                return 0;
-            
-            default:
-                printf("\n无效选择!\n");
-                Sleep(1000);
+            }
+
+            ClearScreen();
+            printf("正在持续锁定阳光值为 %u (按任意键停止)...\n", newSunValue);
+            MonitorSunValue(hProcess, baseAddress, newSunValue);
+            printf("\n已停止锁定阳光值\n");
+            system("pause");
+            break;
+        }
+
+        case 3:
+            CloseHandle(hProcess);
+            return 0;
+
+        default:
+            printf("\n无效选择!\n");
+            Sleep(1000);
         }
     }
 }
 
 // 清屏函数
 void ClearScreen() {
-    system("cls");  // Windows系统使用cls清屏
+    system("cls");
 }
 
 // 通过进程名获取进程ID
-DWORD GetProcessIdByName(const char* processName) {
-    PROCESSENTRY32 pe32;
-    pe32.dwSize = sizeof(PROCESSENTRY32);
-    
+DWORD GetProcessIdByName(const wchar_t* processName) {
+    PROCESSENTRY32W pe32;
+    pe32.dwSize = sizeof(PROCESSENTRY32W);
+
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapshot == INVALID_HANDLE_VALUE) {
         return 0;
     }
-    
-    if (Process32First(hSnapshot, &pe32)) {
+
+    if (Process32FirstW(hSnapshot, &pe32)) {
         do {
-            if (strcmp(pe32.szExeFile, processName) == 0) {
+            if (wcscmp(pe32.szExeFile, processName) == 0) {
                 CloseHandle(hSnapshot);
                 return pe32.th32ProcessID;
             }
-        } while (Process32Next(hSnapshot, &pe32));
+        } while (Process32NextW(hSnapshot, &pe32));
     }
-    
+
     CloseHandle(hSnapshot);
     return 0;
 }
@@ -121,38 +143,51 @@ DWORD GetProcessIdByName(const char* processName) {
 DWORD GetSunValue(HANDLE handle, DWORD baseAddr) {
     DWORD value = 0;
     DWORD_PTR addr = baseAddr + BASE_OFFSET;
-    
+
     // 读取指针链
-    ReadProcessMemory(handle, (LPCVOID)addr, &addr, sizeof(DWORD_PTR), NULL);
+    if (!ReadProcessMemory(handle, (LPCVOID)addr, &addr, sizeof(DWORD_PTR), NULL)) {
+        return 0;
+    }
     addr += SUN_POINTER_OFFSET;
-    ReadProcessMemory(handle, (LPCVOID)addr, &addr, sizeof(DWORD_PTR), NULL);
+
+    if (!ReadProcessMemory(handle, (LPCVOID)addr, &addr, sizeof(DWORD_PTR), NULL)) {
+        return 0;
+    }
     addr += SUN_VALUE_OFFSET;
-    ReadProcessMemory(handle, (LPCVOID)addr, &value, sizeof(DWORD), NULL);
-    
+
+    if (!ReadProcessMemory(handle, (LPCVOID)addr, &value, sizeof(DWORD), NULL)) {
+        return 0;
+    }
+
     return value;
 }
 
 // 设置阳光值
 BOOL SetSunValue(HANDLE handle, DWORD baseAddr, DWORD newValue) {
     DWORD_PTR addr = baseAddr + BASE_OFFSET;
-    
+
     // 读取指针链
-    ReadProcessMemory(handle, (LPCVOID)addr, &addr, sizeof(DWORD_PTR), NULL);
+    if (!ReadProcessMemory(handle, (LPCVOID)addr, &addr, sizeof(DWORD_PTR), NULL)) {
+        return FALSE;
+    }
     addr += SUN_POINTER_OFFSET;
-    ReadProcessMemory(handle, (LPCVOID)addr, &addr, sizeof(DWORD_PTR), NULL);
+
+    if (!ReadProcessMemory(handle, (LPCVOID)addr, &addr, sizeof(DWORD_PTR), NULL)) {
+        return FALSE;
+    }
     addr += SUN_VALUE_OFFSET;
-    
+
     // 写入新值
     return WriteProcessMemory(handle, (LPVOID)addr, &newValue, sizeof(DWORD), NULL);
 }
 
 // 持续监控并锁定阳光值
 void MonitorSunValue(HANDLE handle, DWORD baseAddr, DWORD targetValue) {
-    while (!_kbhit()) {  // 检测是否有按键按下
+    while (!_kbhit()) {
         if (GetSunValue(handle, baseAddr) != targetValue) {
             SetSunValue(handle, baseAddr, targetValue);
         }
-        Sleep(100);  // 每100毫秒检查一次
+        Sleep(100);
     }
-    _getch();  // 清除按键缓冲区
+    _getch();
 }
